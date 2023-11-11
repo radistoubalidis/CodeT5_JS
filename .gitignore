@@ -3,3 +3,4 @@ logs
 data.json
 .hugging-face-token.txt
 .github-api-token.txt
+postgres_stack
