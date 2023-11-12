@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "@babel/eslint-parser": "^7.23.3",
-    "jscodeshift": "^0.15.1"
+    "@babel/eslint-parser": "^7.23.3"
   }
 }
