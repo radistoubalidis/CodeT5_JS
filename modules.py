@@ -1,3 +1,4 @@
+import esprima
 import requests
 
 
@@ -19,3 +20,5 @@ class HuggingFaceClient():
                 url=f"{self.BASE_URL}/{method}",
                 headers=self.AUTH,
             )
+            
+

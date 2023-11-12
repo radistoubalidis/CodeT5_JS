@@ -1,29 +1,40 @@
-/**
- * jscodeshift script to log fixes for max-params rule by transforming functions with more than 3 parameters.
- *
- * Usage:
- * jscodeshift -t transform.js your_file.js
- */
+const esprima = require('esprima');
+const fs = require('fs');
+const escodegen = require('escodegen');
 
-module.exports = function(file, api) {
-  const j = api.jscodeshift;
-  const root = j(file.source);
+const filePath = process.argv[2];
+const code = fs.readFileSync(filePath, 'utf-8');
 
-  // Find all function declarations or expressions with more than 3 parameters
-  root.find(j.FunctionDeclaration, { params: { length: { $gt: 3 } } })
-    .forEach(path => {
-      // Create an object with property names as param names and values as param values
-      const paramObject = j.objectExpression(
-        path.value.params.map(param => j.property('init', param, param))
-      );
-      // Log the proposed changes
-      console.log(`Function "${path.value.id.name}" has more than 3 parameters. Proposed changes:`);
-      console.log(`Replace:`);
-      console.log(path.value.params);
-      console.log(`with:`);
-      console.log(`{ ${path.value.params.map(param => param.name).join(', ')} }`);
-      console.log('---');
-    });
+if (!filePath){
+    console.error('Usage: node your_script.js <path_to_js_file>');
+    process.exit(1);
+}
 
-  return root.toSource();
-};
+// Parse the code into an AST
+const ast = esprima.parseScript(code, { loc: true });
+
+// Function to recursively traverse the AST and transform function parameters
+function transformFunctionParams(node) {
+  if (node.type === 'FunctionDeclaration') {
+    // Found a function declaration
+    const paramObject = esprima.parseScript(`({${node.params.map(param => param.name).join(', ')}})`);
+
+    // Replace the original parameters with the object parameter
+    node.params = [paramObject];
+  }
+
+  // Recursively traverse child nodes
+  for (const key in node) {
+    if (node[key] && typeof node[key] === 'object') {
+      transformFunctionParams(node[key]);
+    }
+  }
+}
+
+// Start the traversal from the root of the AST
+transformFunctionParams(ast);
+
+// Convert the modified AST back to code
+const modifiedCode = escodegen.generate(ast);
+
+console.log(modifiedCode);

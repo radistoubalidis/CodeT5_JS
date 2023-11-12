@@ -9,3 +9,5 @@ fixed_samples
 eslint_outputs
 node_modules
 __pycache__
+sample.js
+dataset_batch.json
