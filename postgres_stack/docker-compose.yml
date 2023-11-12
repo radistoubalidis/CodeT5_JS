@@ -1,0 +1,14 @@
+version: '3.7'
+
+services:
+  dataset-postgres:
+    container_name: datasets-db
+    image: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: thesis
+    ports:
+      - "5432:5432"
+    
