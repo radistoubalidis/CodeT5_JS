@@ -1,0 +1,35 @@
+{
+    "parser": "@babel/eslint-parser",
+    "parserOptions": {
+        "requireConfigFile": false
+    },
+    "rules": {
+        // "no-unused-vars": "error",
+        "max-nested-callbacks": ["error", 3],
+        "max-params": ["error", 3],
+        "complexity": "error",
+        "max-depth": ["error", 3],
+        "max-lines-per-function": ["error", 75],
+        "no-return-assign": "error",
+        "no-script-url": "error",
+        "no-restricted-imports": [
+            "error",
+            {
+                "paths": [
+                {
+                    "name": "moment",
+                    "message": "Consider using the built-in Date object or a modern date library like date-fns or Luxon."
+                },
+                {
+                    "name": "underscore",
+                    "message": "Consider using the native Array and Object methods or a more modern utility library like lodash."
+                },
+                {
+                    "name": "lodash/get",
+                    "message": "Prefer direct property access or destructuring over lodash/get for better readability."
+                }
+                ]
+            }
+        ]
+    }
+}
