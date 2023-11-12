@@ -3,5 +3,9 @@ logs
 data.json
 .hugging-face-token.txt
 .github-api-token.txt
-postgres_stack
 .env
+samples
+fixed_samples
+eslint_outputs
+node_modules
+__pycache__
