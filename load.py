@@ -15,7 +15,6 @@ from sqlalchemy.orm import sessionmaker
 """
 Database Stuff Start
 """
-
 env = load_dotenv(dotenv_path='.env')
 db_username = os.getenv("db_username")
 db_password = os.getenv("db_password")
@@ -37,8 +36,8 @@ def session_add(row):
 Base = declarative_base()
 
 # Dataset ORM
-class Dataset(Base):
-    __tablename__ = 'datasets'
+class BadSamples(Base):
+    __tablename__ = 'bad_samples'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     csn_sample_id = Column(Integer)
@@ -53,13 +52,17 @@ class Dataset(Base):
     severity = Column(Integer)
     line = Column(Integer)
 
+class GoodSamples(Base):
+    __tablename__ = 'good_samples'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    csn_sample_id = Column(Integer)
+    source = Column(Text)
+
 Base.metadata.create_all(engine)
 
 
-def store_dataset(eslint_out):
-    with open(eslint_out,'r') as f:
-        eslint_output = json.load(f)
-
+def store_bad_samples(eslint_output):
     eslint_df = pd.DataFrame(eslint_output)
 
     eslint_df['sample_id'] = [x.split('/')[-1].split('.')[0][1:] for x in eslint_df['filePath']]
@@ -68,23 +71,24 @@ def store_dataset(eslint_out):
     rows_inserted = 0
     for idx, row in eslint_df.iterrows():
         for msg in row['messages']:
-            row_dict = {
-                'csn_sample_id' : row['sample_id'],
-                'rule_id' : msg['ruleId'],
-                'source' : row['source'],
-                'errorCount' : row['errorCount'],
-                'fatalErrorCount' : row['fatalErrorCount'],
-                'warningCount' : row['warningCount'],
-                'fixableErrorCount' : row['fixableErrorCount'],
-                'fixableWarningCount' : row['fixableWarningCount'],
-                'message' : msg['message'],
-                'severity' : msg['severity'],
-                'line' : msg['line'],
-            }
-            table_rows.append(row_dict)
+            if len(msg) > 0:
+                row_dict = {
+                    'csn_sample_id' : row['sample_id'],
+                    'rule_id' : msg['ruleId'],
+                    'source' : row['source'],
+                    'errorCount' : row['errorCount'],
+                    'fatalErrorCount' : row['fatalErrorCount'],
+                    'warningCount' : row['warningCount'],
+                    'fixableErrorCount' : row['fixableErrorCount'],
+                    'fixableWarningCount' : row['fixableWarningCount'],
+                    'message' : msg['message'],
+                    'severity' : msg['severity'],
+                    'line' : msg['line'],
+                }
+                table_rows.append(row_dict)
             
     for row in table_rows:
-        new_ds = Dataset(
+        new_ds = BadSamples(
             csn_sample_id=row['csn_sample_id'],
             rule_id=row['rule_id'] if row['rule_id'] != None else 'js-parser',
             source=row['source'],
@@ -101,10 +105,20 @@ def store_dataset(eslint_out):
         rows_inserted += 1
     session_commit()
     return rows_inserted
+
+def store_good_samples(filepaths):
+    for path in filepaths:
+        file = open(path,'r')
+        contents = file.read()
+        new_sample = GoodSamples(
+            csn_sample_id=path.split('/')[-1].split('.')[0][1:],
+            source=contents
+        )
+        session_add(new_sample)
+    session_commit()    
 """
 Database Stuff End
 """
-
 
 """
 API keys
@@ -148,8 +162,24 @@ def getArgs():
     args = parser.parse_args()
     return args
 
+def remove_batch_files():
+    if os.path.exists('samples'):
+        for file in os.listdir('samples'):
+            os.remove(f"{os.getcwd()}/samples/{file}")
+
 def test():
     print(DS_LENGTH, DS_LENGTH, BATCH_SIZE)
+
+class SampleClassifier():
+    def read_eslint(batch_idx):
+        with open(f"eslint_outputs/eslint_batch_{batch_idx}.json") as f:
+            eslint_out = json.load(f)
+        return eslint_out
+    
+    def files_with_no_errors(eslint_out):
+        eslint_df = pd.DataFrame(eslint_out)
+        return eslint_df.loc[eslint_df['errorCount'] == 0]['filePath'].unique()
+    
 
 """
 Helper functions End
@@ -163,35 +193,50 @@ def main():
     print('Starting to Load Hugging Face Data..')
     hfc = HuggingFaceClient(HUGGINGFACE_TOKEN)
     dataset_index = DS_OFFSET
-    rows_added = 0
-    pbar = tqdm(np.arange(dataset_index, DS_LENGTH))
+    bad_samples_added = 0
+    good_samples_added = 0
+    batched_len = DS_LENGTH // BATCH_SIZE
+    pbar = tqdm(np.arange(dataset_index, batched_len))
     for i in pbar:
-        # params = {
-        #     "dataset":"code_search_net",
-        #     "config":"javascript",
-        #     "split":"train",
-        #     'offset': dataset_index,
-        #     'length': BATCH_SIZE
-        # }
-        # res_ds = hfc.get('rows', params=params)
-        # if res_ds.status_code != 200:
-        #     raise Exception(f"Hugging Face client error:\n{res_ds.json()}")
-        # dataset = res_ds.json()
-        with open('dataset_batch.json','r') as f:
-            dataset = json.load(f)
+        # Get data
+        params = {
+            "dataset":"code_search_net",
+            "config":"javascript",
+            "split":"train",
+            'offset': dataset_index,
+            'length': BATCH_SIZE
+        }
+        res_ds = hfc.get('rows', params=params)
+        
+        # Handle http errors
+        if res_ds.status_code != 200:
+            raise Exception(f"Hugging Face client error:\n{res_ds.json()}")
+        dataset = res_ds.json()
+        
+        # prepare data and create js files
         table_rows = getRows(dataset)
         for row in table_rows:
             writeJS(f"{SAMPLES_DIR}/_{row['dataset_id']}.js", row['func_code_string'])
         
-        pbar.set_postfix({'num_errors_warnings': len(table_rows)})
+        # Run eslint on js files
         dataset_index += BATCH_SIZE
+        run_eslint(i)
         
-    idx = 1
-    run_eslint(idx)
-    if not os.path.exists(f"{ESLINT_OUT_DIR}/eslint_batch_{idx}.json"):
-        raise Exception(f"Reading JS binaries failed.")
-    rows_added += store_dataset(f"{ESLINT_OUT_DIR}/eslint_batch_{idx}.json")
-    
+        # Handle eslint error
+        if not os.path.exists(f"{ESLINT_OUT_DIR}/eslint_batch_{i}.json"):
+            raise Exception(f"Reading JS binaries failed.")
+        
+        # get good samples
+        eslint_out = SampleClassifier.read_eslint(i)
+        good_samples_files = SampleClassifier.files_with_no_errors(eslint_out)
+        store_good_samples(good_samples_files)
+        bad_samples_added += store_bad_samples(eslint_out)
+        good_samples_added += len(good_samples_files)
+        
+        remove_batch_files()
+        pbar.set_postfix({'num_errors_warnings': bad_samples_added, 'num_good_files':good_samples_added})
+        
+
 if __name__ == '__main__':
     args = getArgs()
     BATCH_SIZE = int(args.batch_size)
